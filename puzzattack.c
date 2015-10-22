@@ -365,7 +365,7 @@ void board_draw (board_t *board, board_gfx_t *gfx, int x, int y)
 	vita2d_draw_texture(gfx->cursor, dx, dy);
 
 	if (board->state == STATE_GAMEOVER) {
-		vita2d_font_draw_text(gfx->font, 380, 260, RED, 50, "Game Over");
+		vita2d_font_draw_text(gfx->font, 370, 260, WHITE, 50, "Game Over");
 	}
 	else if (board->state == STATE_PAUSEGAME) {
 		vita2d_font_draw_text(gfx->font, 400, 260, WHITE, 50, "Paused");

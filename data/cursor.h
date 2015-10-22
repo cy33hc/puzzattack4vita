@@ -4,6 +4,6 @@
 
 /* Contents of file cursor.png */
 extern const long int cursor_png_size;
-extern const unsigned char cursor_png[343];
+extern const unsigned char cursor_png[427];
 
 #endif    /* __cursor_h_included */
