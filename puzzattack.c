@@ -6,6 +6,7 @@
 #include <psp2/ctrl.h>
 #include <vita2d.h>
 
+#include "vita_audio.h"
 #include "brick0.h"
 #include "brick1.h"
 #include "brick2.h"
@@ -17,6 +18,8 @@
 #include "lightmask.h"
 #include "background.h"
 #include "font.h"
+#include "cursor_sound.h"
+#include "pop_sound.h"
 
 #define SCREEN_WIDTH 270
 #define SCREEN_HEIGHT 540
@@ -56,13 +59,13 @@ typedef struct board_t {
 	int score;
 } board_t;
 
-typedef struct board_gfx_t {
+typedef struct resource_t {
 	vita2d_texture *brick_surf[NUM_BRICK_TYPES+1];
 	vita2d_texture *cursor;
 	vita2d_texture *lightmask;
 	vita2d_texture *background;
 	vita2d_font *font;
-}board_gfx_t;
+}resource_t;
 
 board_t *board_new();
 void board_init(board_t *board);
@@ -77,12 +80,12 @@ void board_swap_cursor (board_t *board);
 void board_find_matches(board_t *board);
 void board_fall_bricks(board_t *board);
 void board_erase_bricks(board_t *board);
-void board_draw (board_t *board, board_gfx_t *gfx, int x, int y);
+void board_draw (board_t *board, resource_t *resource, int x, int y);
 int board_think(board_t *board, uint64_t ticks);
 
-int load_data (board_gfx_t *gfx);
-void free_data (board_gfx_t *gfx);
-void input_process(board_t *board, SceCtrlData *pad, SceCtrlData *old_pad);
+int load_data (resource_t *resource);
+void free_data (resource_t *resource);
+void input_process(board_t *board, resource_t *resource, SceCtrlData *pad, SceCtrlData *old_pad);
 
 board_t *board_new() 
 {
@@ -262,7 +265,7 @@ void board_find_matches(board_t *board)
 		board->state = STATE_PAUSED;
 		board->pause_time += LIGHT_TIME * lit;
 		board->score += 100 * lit * lit;
-		printf("score: %d\n",board->score);
+		pspAudioOutput((void *)pop_sound, pop_sound_size);
 	}
 }
 
@@ -333,7 +336,7 @@ void board_erase_bricks(board_t *board)
 	}
 }
 
-void board_draw (board_t *board, board_gfx_t *gfx, int x, int y)
+void board_draw (board_t *board, resource_t *resource, int x, int y)
 {
 	int i, j;
 	int dx,dy;
@@ -341,13 +344,13 @@ void board_draw (board_t *board, board_gfx_t *gfx, int x, int y)
 	vita2d_start_drawing();
 	vita2d_clear_screen();
 
-	vita2d_draw_texture(gfx->background, 0, 0);
+	vita2d_draw_texture(resource->background, 0, 0);
 
 	for ( i=0; i<BOARD_HEIGHT; i++ ) {
 		for ( j=0; j<BOARD_WIDTH; j++ ) {
 			dx=(j*BRICK_WIDTH)+x;
 			dy=((BOARD_HEIGHT-1)*BRICK_HEIGHT-(i*BRICK_HEIGHT))+y;
-			vita2d_draw_texture(gfx->brick_surf[board->bricks[i][j]], dx, dy);
+			vita2d_draw_texture(resource->brick_surf[board->bricks[i][j]], dx, dy);
 		}
 	}
 	for ( i=0; i<BOARD_HEIGHT; i++ ) {
@@ -355,25 +358,25 @@ void board_draw (board_t *board, board_gfx_t *gfx, int x, int y)
 			if(board->lit[i][j]) {
 				dx=(j*BRICK_WIDTH)+x;
 				dy=((BOARD_HEIGHT-1)*BRICK_HEIGHT-(i*BRICK_HEIGHT))+y;
-				vita2d_draw_texture(gfx->lightmask, dx, dy);
+				vita2d_draw_texture(resource->lightmask, dx, dy);
 			}
 		}
 	}
 
 	dx = (board->curs_x * BRICK_WIDTH)+x;
 	dy = ((BOARD_HEIGHT-1)*BRICK_HEIGHT-(board->curs_y*BRICK_HEIGHT))+y;
-	vita2d_draw_texture(gfx->cursor, dx, dy);
+	vita2d_draw_texture(resource->cursor, dx, dy);
 
 	if (board->state == STATE_GAMEOVER) {
-		vita2d_font_draw_text(gfx->font, 370, 260, WHITE, 50, "Game Over");
+		vita2d_font_draw_text(resource->font, 370, 260, WHITE, 50, "Game Over");
 	}
 	else if (board->state == STATE_PAUSEGAME) {
-		vita2d_font_draw_text(gfx->font, 400, 260, WHITE, 50, "Paused");
+		vita2d_font_draw_text(resource->font, 400, 260, WHITE, 50, "Paused");
 	}
 
 	char str[22];
 	sprintf(str,"Score: %d", board->score);
-	vita2d_font_draw_text(gfx->font, 10, 10, WHITE, 35, str);
+	vita2d_font_draw_text(resource->font, 10, 10, WHITE, 35, str);
 
 	vita2d_end_drawing();
 	vita2d_swap_buffers();
@@ -408,37 +411,37 @@ int board_think (board_t *board, uint64_t ticks)
 	return 0;
 }
 
-int load_data( board_gfx_t *gfx )
+int load_data( resource_t *resource )
 {
-	gfx->brick_surf[0] = vita2d_load_PNG_buffer(brick0_png);
-	gfx->brick_surf[1] = vita2d_load_PNG_buffer(brick1_png);
-	gfx->brick_surf[2] = vita2d_load_PNG_buffer(brick2_png);
-	gfx->brick_surf[3] = vita2d_load_PNG_buffer(brick3_png);
-	gfx->brick_surf[4] = vita2d_load_PNG_buffer(brick4_png);
-	gfx->brick_surf[5] = vita2d_load_PNG_buffer(brick5_png);
-	gfx->brick_surf[6] = vita2d_load_PNG_buffer(brick6_png);
-	gfx->cursor = vita2d_load_PNG_buffer(cursor_png);
-	gfx->lightmask = vita2d_load_PNG_buffer(lightmask_png);
-	gfx->background = vita2d_load_PNG_buffer(background_png);
-	gfx->font = vita2d_load_font_mem(basicfont, basicfont_size);
+	resource->brick_surf[0] = vita2d_load_PNG_buffer(brick0_png);
+	resource->brick_surf[1] = vita2d_load_PNG_buffer(brick1_png);
+	resource->brick_surf[2] = vita2d_load_PNG_buffer(brick2_png);
+	resource->brick_surf[3] = vita2d_load_PNG_buffer(brick3_png);
+	resource->brick_surf[4] = vita2d_load_PNG_buffer(brick4_png);
+	resource->brick_surf[5] = vita2d_load_PNG_buffer(brick5_png);
+	resource->brick_surf[6] = vita2d_load_PNG_buffer(brick6_png);
+	resource->cursor = vita2d_load_PNG_buffer(cursor_png);
+	resource->lightmask = vita2d_load_PNG_buffer(lightmask_png);
+	resource->background = vita2d_load_PNG_buffer(background_png);
+	resource->font = vita2d_load_font_mem(basicfont, basicfont_size);
 
 	return 0;
 }
 
-void free_data (board_gfx_t *gfx)
+void free_data (resource_t *resource)
 {
 	int i;
 
 	for (i=0;i<NUM_BRICK_TYPES+1;i++) {
-		vita2d_free_texture(gfx->brick_surf[i]);
+		vita2d_free_texture(resource->brick_surf[i]);
 	}
-	vita2d_free_texture(gfx->cursor);
-	vita2d_free_texture(gfx->lightmask);
-	vita2d_free_texture(gfx->background);
-	vita2d_free_font(gfx->font);
+	vita2d_free_texture(resource->cursor);
+	vita2d_free_texture(resource->lightmask);
+	vita2d_free_texture(resource->background);
+	vita2d_free_font(resource->font);
 }
 
-void input_process(board_t *board, SceCtrlData *pad, SceCtrlData *old_pad)
+void input_process(board_t *board, resource_t *resource, SceCtrlData *pad, SceCtrlData *old_pad)
 {
     if (board->state == STATE_GAMEOVER) return;
 
@@ -447,22 +450,27 @@ void input_process(board_t *board, SceCtrlData *pad, SceCtrlData *old_pad)
 	if (keys_down & SCE_CTRL_UP)
 	{
 		board_cursor_up(board);
+		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
 	}
 	else if (keys_down & SCE_CTRL_DOWN)
 	{
 		board_cursor_down(board);
+		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
 	}
 	else if (keys_down & SCE_CTRL_LEFT)
 	{
 		board_cursor_left(board);
+		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
 	}
 	else if (keys_down & SCE_CTRL_RIGHT)
 	{
 		board_cursor_right(board);
+		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
 	}
 	else if (keys_down & SCE_CTRL_CROSS)
 	{
 		board_swap_cursor(board);
+		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
 	}
 	else if (keys_down & SCE_CTRL_LTRIGGER || keys_down & SCE_CTRL_RTRIGGER)
 	{
@@ -473,14 +481,15 @@ void input_process(board_t *board, SceCtrlData *pad, SceCtrlData *old_pad)
 int main (int argc, char **argv)
 {
 	board_t *board;
-	board_gfx_t gfx;
+	resource_t resource;
 	uint64_t ticks, ticks_last, ticks_diff;
 
 	srand(time(NULL));
 
 	vita2d_init();
+	pspAudioInit(-1, 1);
 
-	load_data(&gfx);
+	load_data(&resource);
 
 	board = board_new();
 	board_fill(board,6);
@@ -520,13 +529,13 @@ int main (int argc, char **argv)
 			}
 		} else if (keys_down & SCE_CTRL_SELECT) {
 			board->state = STATE_PAUSEGAME;
-			board_draw(board,&gfx, 345, 0);
+			board_draw(board,&resource, 345, 0);
 			unsigned int retTime = time(0) + 2;
 			while (time(0) < retTime);
 			continue;
 		}
 
-		input_process(board, &pad, &old_pad);
+		input_process(board, &resource, &pad, &old_pad);
 		old_pad = pad;
 
 		ticks_last = ticks;
@@ -536,11 +545,12 @@ int main (int argc, char **argv)
 			break;
 		}
 
-		board_draw(board,&gfx, 345, 0);
+		board_draw(board,&resource, 345, 0);
 	}
 
 	vita2d_fini();
-	free_data(&gfx);
+	pspAudioShutdown();
+	free_data(&resource);
 	free(board);
 
 	return 0;

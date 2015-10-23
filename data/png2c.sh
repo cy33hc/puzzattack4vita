@@ -8,3 +8,5 @@ bin2c -d brick6.h -o brick6.c -name brick6_png brick6.png
 bin2c -d cursor.h -o cursor.c -name cursor_png cursor.png
 bin2c -d lightmask.h -o lightmask.c -name lightmask_png lightmask.png
 bin2c -d background.h -o background.c -name background_png background.png
+bin2c -d cursor_sound.h -o cursor_sound.c -name cursor_sound cursor.wav
+bin2c -d pop_sound.h -o pop_sound.c -name pop_sound pop.wav
