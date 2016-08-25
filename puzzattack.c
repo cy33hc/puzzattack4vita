@@ -446,35 +446,40 @@ void input_process(board_t *board, resource_t *resource, SceCtrlData *pad, SceCt
     if (board->state == STATE_GAMEOVER) return;
 
 	unsigned int keys_down = pad->buttons & ~old_pad->buttons;
+	short playsound = 0;
 
 	if (keys_down & SCE_CTRL_UP)
 	{
 		board_cursor_up(board);
-		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
 	}
-	else if (keys_down & SCE_CTRL_DOWN)
+	if (keys_down & SCE_CTRL_DOWN)
 	{
 		board_cursor_down(board);
-		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
+		playsound = 1;
 	}
-	else if (keys_down & SCE_CTRL_LEFT)
+	if (keys_down & SCE_CTRL_LEFT)
 	{
 		board_cursor_left(board);
-		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
+		playsound = 1;
 	}
-	else if (keys_down & SCE_CTRL_RIGHT)
+	if (keys_down & SCE_CTRL_RIGHT)
 	{
 		board_cursor_right(board);
-		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
+		playsound = 1;
 	}
-	else if (keys_down & SCE_CTRL_CROSS)
+	if (keys_down & SCE_CTRL_CROSS)
 	{
 		board_swap_cursor(board);
-		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
+		playsound = 1;
 	}
-	else if (keys_down & SCE_CTRL_LTRIGGER || keys_down & SCE_CTRL_RTRIGGER)
+	if (keys_down & SCE_CTRL_LTRIGGER || keys_down & SCE_CTRL_RTRIGGER)
 	{
 		board_scroll(board);
+	}
+
+	if (playsound)
+	{
+		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
 	}
 }
 
