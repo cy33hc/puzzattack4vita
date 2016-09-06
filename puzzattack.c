@@ -30,6 +30,8 @@
 #define STAND_TIME_BREAK 250
 #define STAND_TIME_FALL 125
 
+#define RISE_INTERVAL 60000
+
 typedef struct board_t {
 	int bricks[BOARD_HEIGHT][BOARD_WIDTH];		// array of actual bricks
 	int lit[BOARD_HEIGHT][BOARD_WIDTH];		// timer for lit up bricks
@@ -38,6 +40,7 @@ typedef struct board_t {
 	int pause_time;
 	int rise_time;
 	int next_rise_time;
+	int rise_interval;
 	int curs_x, curs_y;
 	int score;
 } board_t;
@@ -128,6 +131,7 @@ void board_init(board_t *board)
 	board->curs_y = 0;
 	board->rise_time = 10000;
 	board->next_rise_time = 10000;
+	board->rise_interval = RISE_INTERVAL;
 	board->pause_time = 0;
 	board->score = 0;
 }
@@ -409,10 +413,14 @@ int board_think (board_t *board, resources_t *resources, int ticks)
 	switch (board->state) {
 		case STATE_RISING:
 			board->rise_time -= ticks;
+			board->rise_interval -= ticks;
 			if (board->rise_time <= 0) {
 				board_scroll(board);
 				board->rise_time = board->next_rise_time;
-				board->next_rise_time *= 0.95;
+				if (board->rise_interval <= 0 ) {
+					board->next_rise_time *= 0.95;
+					board->rise_interval = RISE_INTERVAL;
+				}
 			}
 			break;
 		case STATE_PAUSED:
