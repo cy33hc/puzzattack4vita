@@ -1,0 +1,3 @@
+Puzzattack is an open source clone of tetris attack written in C using SDL.
+
+To compile, simply type 'make'.

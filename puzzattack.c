@@ -2,27 +2,16 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
-#include <psp2/rtc.h>
-#include <psp2/ctrl.h>
-#include <vita2d.h>
+#include <SDL/SDL.h>
 
-#include "vita_audio.h"
-#include "brick0.h"
-#include "brick1.h"
-#include "brick2.h"
-#include "brick3.h"
-#include "brick4.h"
-#include "brick5.h"
-#include "brick6.h"
-#include "cursor.h"
-#include "lightmask.h"
-#include "background.h"
-#include "font.h"
-#include "cursor_sound.h"
-#include "pop_sound.h"
+#include "SDL/SDL_ttf.h"
+#include "SDL/SDL_mixer.h"
+#include "SDL_vita_button.h"
 
-#define SCREEN_WIDTH 270
-#define SCREEN_HEIGHT 540
+#define SRCDIR "app0:assets"
+
+#define SCREEN_WIDTH 960
+#define SCREEN_HEIGHT 544
 
 #define BOARD_HEIGHT 12
 #define BOARD_WIDTH 6
@@ -37,15 +26,9 @@
 #define STATE_GAMEOVER 2
 #define STATE_PAUSEGAME 3
 
-#define LIGHT_TIME 20
-#define STAND_TIME_BREAK 5
-#define STAND_TIME_FALL 2
-
-#define BLACK   RGBA8(  0,   0,   0, 255)
-#define WHITE   RGBA8(255, 255, 255, 255)
-#define GREEN   RGBA8(  0, 255,   0, 255)
-#define RED     RGBA8(255,   0,   0, 255)
-#define BLUE    RGBA8(  0,   0, 255, 255)
+#define LIGHT_TIME 500
+#define STAND_TIME_BREAK 250
+#define STAND_TIME_FALL 125
 
 typedef struct board_t {
 	int bricks[BOARD_HEIGHT][BOARD_WIDTH];		// array of actual bricks
@@ -59,13 +42,18 @@ typedef struct board_t {
 	int score;
 } board_t;
 
-typedef struct resource_t {
-	vita2d_texture *brick_surf[NUM_BRICK_TYPES+1];
-	vita2d_texture *cursor;
-	vita2d_texture *lightmask;
-	vita2d_texture *background;
-	vita2d_font *font;
-}resource_t;
+typedef struct resources_t {
+	SDL_Surface *brick_surf[NUM_BRICK_TYPES+1];
+	SDL_Surface *cursor;
+	SDL_Surface *lightmask;
+	SDL_Surface *background;
+	TTF_Font *font30;
+	TTF_Font *font50;
+	Mix_Chunk *cursor_sound;
+	Mix_Chunk *explode_sound;
+}resources_t;
+
+SDL_Color whiteColor = { 255, 255, 255 };
 
 board_t *board_new();
 void board_init(board_t *board);
@@ -77,15 +65,50 @@ void board_cursor_right (board_t *board);
 void board_cursor_up (board_t *board);
 void board_cursor_down (board_t *board);
 void board_swap_cursor (board_t *board);
-void board_find_matches(board_t *board);
+void board_find_matches(board_t *board, resources_t *resources);
 void board_fall_bricks(board_t *board);
 void board_erase_bricks(board_t *board);
-void board_draw (board_t *board, resource_t *resource, int x, int y);
-int board_think(board_t *board, uint64_t ticks);
+void board_draw (SDL_Surface *screen, board_t *board, resources_t *resources, int x, int y);
+int board_think(board_t *board, resources_t *resources, int ticks);
 
-int load_data (resource_t *resource);
-void free_data (resource_t *resource);
-void input_process(board_t *board, resource_t *resource, SceCtrlData *pad, SceCtrlData *old_pad);
+int load_resources (resources_t *resources);
+void free_resources (resources_t *resources);
+SDL_Surface *screen_init();
+int input_process(SDL_Surface *screen, board_t *board, resources_t *resources);
+
+void displaySurface( int x, int y, SDL_Surface* source, SDL_Surface* destination, SDL_Rect* clip)
+{
+    //Holds offsets
+    SDL_Rect offset;
+
+    //Get offsets
+    offset.x = x;
+    offset.y = y;
+
+    //Blit
+    SDL_BlitSurface( source, clip, destination, &offset );
+}
+
+int displayMessage(TTF_Font *font, const char* text, int x, int y, SDL_Surface* screen) {
+	SDL_Surface *message = NULL;
+	
+    //Render the text
+    message = TTF_RenderText_Blended( font, text, whiteColor );
+
+    //If there was an error in rendering the text
+    if( message == NULL )
+    {
+        return 1;
+    }
+
+    //Show the message on the screen
+    displaySurface( x, y, message, screen, NULL);
+
+    //Free the message
+    SDL_FreeSurface( message );
+
+	return 0;
+}
 
 board_t *board_new() 
 {
@@ -103,8 +126,8 @@ void board_init(board_t *board)
 	board_clear(board);
 	board->curs_x = 0;
 	board->curs_y = 0;
-	board->rise_time = 1000;
-	board->next_rise_time = 1000;
+	board->rise_time = 10000;
+	board->next_rise_time = 10000;
 	board->pause_time = 0;
 	board->score = 0;
 }
@@ -209,7 +232,7 @@ void board_swap_cursor (board_t *board)
 	board_fall_bricks(board);
 }
 
-void board_find_matches(board_t *board)
+void board_find_matches(board_t *board, resources_t *resources)
 {
 	int i, j, k;
 	int count;
@@ -265,11 +288,12 @@ void board_find_matches(board_t *board)
 		board->state = STATE_PAUSED;
 		board->pause_time += LIGHT_TIME * lit;
 		board->score += 100 * lit * lit;
-		pspAudioOutput((void *)pop_sound, pop_sound_size);
+		printf("score: %d\n",board->score);
+		Mix_PlayChannel( -1, resources->explode_sound, 0 );
 	}
 }
 
-void board_process_lights(board_t *board, uint64_t ticks)
+void board_process_lights(board_t *board, int ticks)
 {
 	int i, j;
 
@@ -287,7 +311,7 @@ void board_process_lights(board_t *board, uint64_t ticks)
 	}
 }
 
-void board_process_standing(board_t *board, uint64_t ticks)
+void board_process_standing(board_t *board, int ticks)
 {
 	int i, j;
 
@@ -336,53 +360,51 @@ void board_erase_bricks(board_t *board)
 	}
 }
 
-void board_draw (board_t *board, resource_t *resource, int x, int y)
+void board_draw (SDL_Surface *screen, board_t *board, resources_t *resources, int x, int y)
 {
 	int i, j;
-	int dx,dy;
+	SDL_Rect dest;
 
-	vita2d_start_drawing();
-	vita2d_clear_screen();
-
-	vita2d_draw_texture(resource->background, 0, 0);
-
+	dest.x = 0; dest.y = 0;
+	SDL_BlitSurface(resources->background,NULL,screen,&dest);
+	
 	for ( i=0; i<BOARD_HEIGHT; i++ ) {
 		for ( j=0; j<BOARD_WIDTH; j++ ) {
-			dx=(j*BRICK_WIDTH)+x;
-			dy=((BOARD_HEIGHT-1)*BRICK_HEIGHT-(i*BRICK_HEIGHT))+y;
-			vita2d_draw_texture(resource->brick_surf[board->bricks[i][j]], dx, dy);
+			dest.x=(j*BRICK_WIDTH)+x;
+			dest.y=((BOARD_HEIGHT-1)*BRICK_HEIGHT-(i*BRICK_HEIGHT))+y;
+			SDL_BlitSurface(resources->brick_surf[board->bricks[i][j]], NULL, screen, &dest);
 		}
 	}
 	for ( i=0; i<BOARD_HEIGHT; i++ ) {
 		for ( j=0; j<BOARD_WIDTH; j++ ) {
 			if(board->lit[i][j]) {
-				dx=(j*BRICK_WIDTH)+x;
-				dy=((BOARD_HEIGHT-1)*BRICK_HEIGHT-(i*BRICK_HEIGHT))+y;
-				vita2d_draw_texture(resource->lightmask, dx, dy);
+				dest.x=(j*BRICK_WIDTH)+x;
+				dest.y=((BOARD_HEIGHT-1)*BRICK_HEIGHT-(i*BRICK_HEIGHT))+y;
+				SDL_BlitSurface(resources->lightmask, NULL, screen, &dest);
 			}
 		}
 	}
 
-	dx = (board->curs_x * BRICK_WIDTH)+x;
-	dy = ((BOARD_HEIGHT-1)*BRICK_HEIGHT-(board->curs_y*BRICK_HEIGHT))+y;
-	vita2d_draw_texture(resource->cursor, dx, dy);
+	dest.x = (board->curs_x * BRICK_WIDTH)+x;
+	dest.y = (BOARD_HEIGHT-1)*BRICK_HEIGHT-(board->curs_y*BRICK_HEIGHT);
+	SDL_BlitSurface(resources->cursor,NULL,screen,&dest);
 
+	if (board->state == STATE_PAUSEGAME) {
+		displayMessage(resources->font50, "Paused", 390, 260, screen);
+	}
+	
 	if (board->state == STATE_GAMEOVER) {
-		vita2d_font_draw_text(resource->font, 370, 260, WHITE, 50, "Game Over");
+		displayMessage(resources->font50, "Game Over", 355, 260, screen);
 	}
-	else if (board->state == STATE_PAUSEGAME) {
-		vita2d_font_draw_text(resource->font, 400, 260, WHITE, 50, "Paused");
-	}
+	
+	char message[30];
+	sprintf(message,"Score: %d", board->score);
+	displayMessage(resources->font30, message, 10, 10, screen);
 
-	char str[22];
-	sprintf(str,"Score: %d", board->score);
-	vita2d_font_draw_text(resource->font, 10, 10, WHITE, 35, str);
-
-	vita2d_end_drawing();
-	vita2d_swap_buffers();
+	SDL_UpdateRect(screen, 0, 0, 0, 0);
 }
 
-int board_think (board_t *board, uint64_t ticks) 
+int board_think (board_t *board, resources_t *resources, int ticks) 
 {
 	switch (board->state) {
 		case STATE_RISING:
@@ -406,157 +428,256 @@ int board_think (board_t *board, uint64_t ticks)
 	board_process_lights(board,ticks);
 	board_process_standing(board,ticks);
 	board_fall_bricks(board);
-	board_find_matches(board);
+	board_find_matches(board, resources);
 
 	return 0;
 }
 
-int load_data( resource_t *resource )
+int load_resources( resources_t *resources )
 {
-	resource->brick_surf[0] = vita2d_load_PNG_buffer(brick0_png);
-	resource->brick_surf[1] = vita2d_load_PNG_buffer(brick1_png);
-	resource->brick_surf[2] = vita2d_load_PNG_buffer(brick2_png);
-	resource->brick_surf[3] = vita2d_load_PNG_buffer(brick3_png);
-	resource->brick_surf[4] = vita2d_load_PNG_buffer(brick4_png);
-	resource->brick_surf[5] = vita2d_load_PNG_buffer(brick5_png);
-	resource->brick_surf[6] = vita2d_load_PNG_buffer(brick6_png);
-	resource->cursor = vita2d_load_PNG_buffer(cursor_png);
-	resource->lightmask = vita2d_load_PNG_buffer(lightmask_png);
-	resource->background = vita2d_load_PNG_buffer(background_png);
-	resource->font = vita2d_load_font_mem(basicfont, basicfont_size);
+	int i;
+	char buf[256];
+	SDL_Surface *temp;
+	Uint32 colorkey;
+
+	for (i=0;i<NUM_BRICK_TYPES+1;i++) {
+		sprintf(buf,"%s/brick%i.bmp",SRCDIR,i);
+		if ((temp = SDL_LoadBMP(buf)) == NULL) {
+			sprintf(buf,"%s/brick%i.bmp","bmp",i);
+			if ((temp = SDL_LoadBMP(buf)) == NULL) {
+				return 1;
+			}
+		}
+		resources->brick_surf[i] = SDL_DisplayFormat(temp);
+		SDL_FreeSurface(temp);
+	}
+	sprintf(buf,"%s/cursor.bmp",SRCDIR);
+	if((temp = SDL_LoadBMP(buf)) == NULL) {
+			sprintf(buf,"%s/cursor.bmp","bmp");
+			if((temp = SDL_LoadBMP(buf)) == NULL) {
+				return 1;
+			}
+	}
+	resources->cursor = SDL_DisplayFormat(temp);
+	colorkey = SDL_MapRGB(resources->cursor->format, 0, 0, 255);
+	SDL_SetColorKey(resources->cursor, SDL_SRCCOLORKEY, colorkey);
+	SDL_FreeSurface(temp);
+
+	sprintf(buf,"%s/lightmask.bmp",SRCDIR);
+	if((temp = SDL_LoadBMP(buf)) == NULL) {
+			sprintf(buf,"%s/lightmask.bmp","bmp");
+			if((temp = SDL_LoadBMP(buf)) == NULL) {
+				return 1;
+			}
+	}
+	resources->lightmask = SDL_DisplayFormat(temp);
+	colorkey = SDL_MapRGB(resources->lightmask->format, 0, 0, 255);
+	SDL_SetColorKey(resources->lightmask, SDL_SRCCOLORKEY, colorkey);
+	SDL_FreeSurface(temp);
+
+	sprintf(buf,"%s/background.bmp",SRCDIR);
+	if((temp = SDL_LoadBMP(buf)) == NULL) {
+			sprintf(buf,"%s/background.bmp","bmp");
+			if((temp = SDL_LoadBMP(buf)) == NULL) {
+				return 1;
+			}
+	}
+	resources->background = SDL_DisplayFormat(temp);
+	colorkey = SDL_MapRGB(resources->background->format, 0, 0, 255);
+	SDL_SetColorKey(resources->background, SDL_SRCCOLORKEY, colorkey);
+	SDL_FreeSurface(temp);
+
+	sprintf(buf,"%s/Ubuntu-R.ttf",SRCDIR);
+	resources->font30 = TTF_OpenFont(buf, 30 );
+	if (resources->font30 == NULL) {
+		return 1;
+	}
+
+	resources->font50 = TTF_OpenFont(buf, 50 );
+	if (resources->font50 == NULL) {
+		return 1;
+	}
+
+	sprintf(buf,"%s/cursor.wav",SRCDIR);
+	resources->cursor_sound = Mix_LoadWAV(buf);
+	if (resources->cursor_sound == NULL) {
+		return 1;
+	}
+	
+	sprintf(buf,"%s/explode.wav",SRCDIR);
+	resources->explode_sound = Mix_LoadWAV(buf);
+	if (resources->explode_sound == NULL) {
+		return 1;
+	}
 
 	return 0;
 }
 
-void free_data (resource_t *resource)
+void free_resources (resources_t *resources)
 {
 	int i;
 
 	for (i=0;i<NUM_BRICK_TYPES+1;i++) {
-		vita2d_free_texture(resource->brick_surf[i]);
+		SDL_FreeSurface(resources->brick_surf[i]);
 	}
-	vita2d_free_texture(resource->cursor);
-	vita2d_free_texture(resource->lightmask);
-	vita2d_free_texture(resource->background);
-	vita2d_free_font(resource->font);
+
+	SDL_FreeSurface(resources->background);
+	SDL_FreeSurface(resources->lightmask);
+	SDL_FreeSurface(resources->cursor);
+	
+	TTF_CloseFont(resources->font30);
+	TTF_CloseFont(resources->font50);
+	
+	Mix_FreeChunk(resources->cursor_sound);
+	Mix_FreeChunk(resources->explode_sound);
 }
 
-void input_process(board_t *board, resource_t *resource, SceCtrlData *pad, SceCtrlData *old_pad)
+SDL_Surface *screen_init()
 {
-    if (board->state == STATE_GAMEOVER) return;
+	SDL_Surface *screen;
 
-	unsigned int keys_down = pad->buttons & ~old_pad->buttons;
-	short playsound = 0;
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO)) {
+		return NULL;
+	}
+	atexit(SDL_Quit);
 
-	if (keys_down & SCE_CTRL_UP)
-	{
-		board_cursor_up(board);
-	}
-	if (keys_down & SCE_CTRL_DOWN)
-	{
-		board_cursor_down(board);
-		playsound = 1;
-	}
-	if (keys_down & SCE_CTRL_LEFT)
-	{
-		board_cursor_left(board);
-		playsound = 1;
-	}
-	if (keys_down & SCE_CTRL_RIGHT)
-	{
-		board_cursor_right(board);
-		playsound = 1;
-	}
-	if (keys_down & SCE_CTRL_CROSS)
-	{
-		board_swap_cursor(board);
-		playsound = 1;
-	}
-	if (keys_down & SCE_CTRL_LTRIGGER || keys_down & SCE_CTRL_RTRIGGER)
-	{
-		board_scroll(board);
+	screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, 0);
+	if (screen == NULL) {
+		return NULL;
 	}
 
-	if (playsound)
-	{
-		pspAudioOutput((void *)cursor_sound, cursor_sound_size);
+	SDL_ShowCursor(SDL_DISABLE);
+
+	//Initialize SDL_ttf
+	if( TTF_Init() == -1 ) {
+		return NULL;
 	}
+
+	//Initialize SDL_mixer
+	if( Mix_OpenAudio( 44100, MIX_DEFAULT_FORMAT, 2, 4096 ) == -1 ) {
+		return NULL;
+	}
+
+	return screen;
+}
+
+int input_process(SDL_Surface *screen, board_t *board, resources_t *resources)
+{
+	SDL_Event event;
+	short playSound = 0;
+
+	if (board->state == STATE_GAMEOVER) {
+		while (SDL_PollEvent(&event) != 0) {
+			switch (event.type) {
+				case SDL_JOYBUTTONDOWN:
+					switch(event.jbutton.button) {
+						case VITA_BTN_START:
+							board_init(board);
+							board_fill(board, 6);
+							board->state = STATE_RISING;
+							return 0;
+					}
+			}
+		}
+		return 1;
+	}
+	else if (board->state == STATE_PAUSEGAME) {
+		while (SDL_PollEvent(&event) != 0) {
+			switch (event.type) {
+				case SDL_JOYBUTTONDOWN:
+					switch(event.jbutton.button) {
+						case VITA_BTN_SELECT:
+							board->state = STATE_RISING;
+							return 0;
+					}
+			}
+		}
+		return 1;
+	}	
+	else {
+		while (SDL_PollEvent(&event) != 0) {
+			switch (event.type) {
+				case SDL_JOYBUTTONDOWN:
+					switch(event.jbutton.button) {
+						case VITA_BTN_CROSS:
+							board_swap_cursor(board);
+							playSound = 1;
+							break;
+						case VITA_BTN_LTRIGGER:
+						case VITA_BTN_RTRIGGER:
+							board_scroll(board);
+							break;
+						case VITA_BTN_LEFT:
+							board_cursor_left(board);
+							playSound = 1;
+							break;
+						case VITA_BTN_RIGHT:
+							board_cursor_right(board);
+							playSound = 1;
+							break;
+						case VITA_BTN_UP:
+							board_cursor_up(board);
+							playSound = 1;
+							break;
+						case VITA_BTN_DOWN:
+							board_cursor_down(board);
+							playSound = 1;
+							break;
+						case VITA_BTN_SELECT:
+							board->state = STATE_PAUSEGAME;
+							break;
+						default:
+							break;
+					}
+					break;
+			}
+
+			if (playSound == 1) {
+				Mix_PlayChannel( -1, resources->cursor_sound, 0 );
+			}
+		}
+	}
+	return 0;
 }
 
 int main (int argc, char **argv)
 {
+	SDL_Surface *screen;
 	board_t *board;
-	resource_t resource;
-	uint64_t ticks, ticks_last, ticks_diff;
-
+	resources_t resources;
+	int ticks, ticks_last, ticks_diff;
+	SDL_Joystick *joystick;
+	
 	srand(time(NULL));
 
-	vita2d_init();
-	pspAudioInit(-1, 1);
-
-	load_data(&resource);
+	screen = screen_init();
+	joystick = SDL_JoystickOpen(0);
+	if (screen == NULL) {
+		exit(1);
+	}
+	if(load_resources(&resources)) {
+		exit(1);
+	}
 
 	board = board_new();
 	board_fill(board,6);
 
-	sceRtcGetCurrentTick(&ticks);
-
-	uint64_t res = sceRtcGetTickResolution();
-	uint64_t ticks_per_sec = res / 60;
-	SceCtrlData pad, old_pad;
-	memset(&pad, 0, sizeof(pad));
-	memset(&old_pad, 0, sizeof(old_pad));
-
+	ticks = SDL_GetTicks();
 	board->state = STATE_RISING;
 	while (1) {
-		sceCtrlPeekBufferPositive(0, &pad, 1);
-		unsigned int keys_down = pad.buttons & ~old_pad.buttons;		
-
-		if (board->state == STATE_GAMEOVER)
-		{
-			if (keys_down & SCE_CTRL_START) {
-				board_init(board);
-				board_fill(board, 6);
-				sceRtcGetCurrentTick(&ticks);
-				board->state = STATE_RISING;
-			}
-			else
-			{
-				continue;
-			}
-		}
-		if (board->state == STATE_PAUSEGAME) {
-			if (keys_down & SCE_CTRL_SELECT) {
-				sceRtcGetCurrentTick(&ticks);
-				board->state = STATE_RISING;
-			} else {
-				continue;
-			}
-		} else if (keys_down & SCE_CTRL_SELECT) {
-			board->state = STATE_PAUSEGAME;
-			board_draw(board,&resource, 345, 0);
-			unsigned int retTime = time(0) + 2;
-			while (time(0) < retTime);
+		if(input_process(screen,board, &resources))
 			continue;
-		}
-
-		input_process(board, &resource, &pad, &old_pad);
-		old_pad = pad;
-
 		ticks_last = ticks;
-		sceRtcGetCurrentTick(&ticks);
-		ticks_diff = (ticks - ticks_last) / ticks_per_sec; 
-		if(board_think(board, ticks_diff)) {
-			break;
-		}
-
-		board_draw(board,&resource, 345, 0);
+		ticks = SDL_GetTicks();
+		ticks_diff = ticks - ticks_last;
+		board_think(board, &resources, ticks_diff);
+		board_draw(screen,board,&resources,345, 0);
 	}
 
-	vita2d_fini();
-	pspAudioShutdown();
-	free_data(&resource);
+	free_resources(&resources);
 	free(board);
+	SDL_JoystickClose(joystick);
+	SDL_Quit();
 
 	return 0;
 }
